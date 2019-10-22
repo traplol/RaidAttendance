@@ -1,0 +1,8 @@
+## Interface: 11302
+## Version: 1.0.0
+## Title: Raid Attendance
+## Notes: Utility for dumping raid attendance into a csv
+## Author: Mm-Incendius
+## SavedVariablesPerCharacter: RaidAttendancePerSettings
+
+RaidAttendance.xml

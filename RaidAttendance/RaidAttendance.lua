@@ -6,6 +6,8 @@
 --]]
 
 
+local AddonPrefix = "RaidAttend";
+
 local RARITY_POOR = 0
 local RARITY_COMMON = 1
 local RARITY_UNCOMMON = 2
@@ -241,47 +243,97 @@ function LootLoggerFrame_OnLoad(self)
     self:RegisterEvent("PLAYER_LOGIN")
     self:RegisterEvent("PLAYER_ENTERING_WORLD")
     self:RegisterEvent("CHAT_MSG_LOOT")
+    self:RegisterEvent("CHAT_MSG_WHISPER")
+    self:RegisterEvent("CHAT_MSG_ADDON")
+end
+
+local function LogLoot(timestamp, recipient, itemId, quantity)
+    if RaidAttendancePerSettings.LootLog[recipient] == nil then
+        RaidAttendancePerSettings.LootLog[recipient] = {}
+    end
+    local itemName, _, itemRarity = GetItemInfo(itemId)
+    
+    --print(timestamp, recipient, itemId, quantity)
+
+    local found = false
+    for i, elem in ipairs(RaidAttendancePerSettings.LootLog[recipient]) do
+        -- 3 seconds timestamp drift is kind of weird, does server send the same guid to all clients for the loot? 
+        if abs(timestamp - elem.timestamp) < 3 and itemId == elem.itemId and quantity == elem.quantity then
+            --print("Item already in log: ", timestamp, recipient, itemId, quantity)
+            found = true
+            break
+        end
+    end
+
+    if not found then
+        table.insert(RaidAttendancePerSettings.LootLog[recipient], {
+            timestamp = timestamp,
+            itemId = itemId,
+            itemName = itemName,
+            itemRarity = itemRarity,
+            quantity = quantity
+        })
+    end
+    return not found
 end
 
 local function HandleMsgLoot(...)
-
-    if RaidAttendancePerSettings.IsLogging then
-        local text, _, _, _, who = ...
-        if not string.match(text, "receives? loot") then
-            return 
-        end
-        local itemLink = string.match(text,"|%x+|Hitem:.-|h.-|h|r")
-        local itemQty = string.match(text,"|%x+|Hitem:.-|h.-|h|rx(%d+)") or 1
-        local itemString = string.match(itemLink, "item[%-?%d:]+")
-
-        if who and itemLink then
-            local itemId, itemName, itemRarity = LootInfo(itemString)
-            if itemRarity < RaidAttendancePerSettings.MinRarity then
-                return
-            end
-            local stat = string.format("%s looted a %s x%d", who, itemName, itemQty)
+    local text, _, _, _, recipient = ...
+    if not string.match(text, "receives? loot") then
+        return 
+    end
+    local itemLink = string.match(text,"|%x+|Hitem:.-|h.-|h|r")
+    local quantity = string.match(text,"|%x+|Hitem:.-|h.-|h|rx(%d+)") or 1
+    local itemString = string.match(itemLink, "item[%-?%d:]+")
+    if recipient and itemLink then
+        local itemId, itemName, itemRarity = LootInfo(itemString)
+        local timestamp = GetServerTime()
+        local syncMsg = string.format("SYNC:%s:%s:%s:%s", timestamp, recipient, itemId, quantity)
+        C_ChatInfo.SendAddonMessage(AddonPrefix, syncMsg, "RAID")
+        if RaidAttendancePerSettings.IsLogging and 
+           (true or itemRarity >= RaidAttendancePerSettings.MinRarity) and
+           LogLoot(tonumber(timestamp), recipient, tonumber(itemId), tonumber(quantity)) then
+            local stat = string.format("%s looted a %s x%s", recipient, itemName, quantity)
             print(stat)
             --SendChatMessage(stat, "PARTY")
-            
-            if RaidAttendancePerSettings.LootLog[who] == nil then
-                RaidAttendancePerSettings.LootLog[who] = {}
-            end
-
-            table.insert(RaidAttendancePerSettings.LootLog[who], {
-                timestamp = GetServerTime(),
-                itemId = itemId,
-                itemName = itemName,
-                itemRarity = itemRarity,
-                quantity = itemQty
-            })
         end
+    end
+end
 
+local function HandleMsgWhisper(...)
+    if RaidAttendancePerSettings.IsLogging then
+        local text, _, _, _, who = ...
+        if text and string.sub(text, 1, 1) == "!" then
+            SendChatMessage(string.format("[%s]: %s", who, text), "OFFICER")
+        end
+    end
+end
+
+local function HandleAddonMsg(text, channel, sender, target)
+    if RaidAttendancePerSettings.IsLogging then
+        local split = { strsplit(":", text) }
+        if split[1] == "SYNC" then
+            local _, timestamp, recipient, itemId, quantity = unpack(split)
+            local itemName, _, itemRarity = GetItemInfo(itemId)
+            if (true or itemRarity >= RaidAttendancePerSettings.MinRarity) and
+               LogLoot(tonumber(timestamp), recipient, tonumber(itemId), tonumber(quantity)) then
+                print(string.format("Received SYNC from %s: %s looted a %s x%s", sender, recipient, itemName, quantity))  
+            end
+            --print(timestamp, recipient, itemId, quantity)
+        end
     end
 end
 
 function LootLoggerFrame_OnEvent(self, event, ...)
     if event == "CHAT_MSG_LOOT" then
         HandleMsgLoot(...)
+    elseif event == "CHAT_MSG_WHISPER" then
+        HandleMsgWhisper(...)
+    elseif event == "CHAT_MSG_ADDON" then
+        local prefix, text, channel, sender, target = ...
+        if prefix == AddonPrefix then
+            HandleAddonMsg(text, channel, sender, target)
+        end
     elseif event == "VARIABLES_LOADED" then
         --RaidAttendancePerSettings = nil -- debug to reset settings
         if type(RaidAttendancePerSettings) ~= "table" then
@@ -292,9 +344,9 @@ function LootLoggerFrame_OnEvent(self, event, ...)
             }
         end
     elseif event == "PLAYER_LOGIN" then
-    --
+        C_ChatInfo.RegisterAddonMessagePrefix(AddonPrefix)
     elseif event == "PLAYER_ENTERING_WORLD" then
-    --
+        --
     end
 end
 

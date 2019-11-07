@@ -317,7 +317,7 @@ local function HandleAddonMsg(text, channel, sender, target)
             local itemName, _, itemRarity = GetItemInfo(itemId)
             if (true or itemRarity >= RaidAttendancePerSettings.MinRarity) and
                LogLoot(tonumber(timestamp), recipient, tonumber(itemId), tonumber(quantity)) then
-                print(string.format("Received SYNC from %s: %s looted a %s x%s", sender, recipient, itemName, quantity))  
+                print(string.format("Received SYNC from %s: %s looted a %s x%s", sender, recipient, itemName or itemId, quantity))  
             end
             --print(timestamp, recipient, itemId, quantity)
         end
@@ -356,14 +356,17 @@ SlashCmdList["LOOTDUMP"] = function(msg)
     local index = 1
     for who, loot in pairs(RaidAttendancePerSettings.LootLog) do
         for i, value in ipairs(loot) do
-            text = text .. string.format("%s,%s,%s,%s,\"%s\",%s\n", 
-                                    index, 
-                                    who, 
-                                    value.timestamp, 
-                                    value.itemId, 
-                                    value.itemName:gsub('"', '""'), 
-                                    value.quantity)
-            index = index + 1
+            if value.itemId then
+                local itemName = value.itemName or GetItemInfo(value.itemId) or "UNKNOWN"
+                text = text .. string.format("%s,%s,%s,%s,\"%s\",%s\n", 
+                                        index, 
+                                        who, 
+                                        value.timestamp, 
+                                        value.itemId, 
+                                        itemName,
+                                        value.quantity)
+                index = index + 1
+            end
         end
     end
     KethoEditBox_Show(text)
